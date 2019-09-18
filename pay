@@ -1,0 +1,60 @@
+    微信支付引用包
+    <dependency>
+			<groupId>com.github.binarywang</groupId>
+			<artifactId>weixin-java-pay</artifactId>
+			<version>3.4.0</version>
+		</dependency>
+    支付宝支付引用包
+		<dependency>
+			<groupId>com.alipay.sdk</groupId>
+			<artifactId>alipay-sdk-java</artifactId>
+			<version>3.7.110.ALL</version>
+		</dependency>
+    
+       public AliPrePayDTO prePcPay(PrePayReq req) throws AlipayApiException{
+        boolean exists = paymentService.existsByPaySuccessOrderId(req.getOrderId());
+        if (exists) {
+            throw new CcRequestException("已支付订单");
+        }
+        //1. 初始化支付单
+        PaymentEntity entity = new PaymentEntity();
+        entity.setChannel(PayChannel.ALIPAY.value());
+        entity.setOrderId(req.getOrderId());
+        entity.setUserId(req.getUserId());
+        entity.setOrderNo(req.getOrderNo());
+        entity.setProductTag(req.getProductTag());
+        entity.setTotalFee(req.getTotalFee());
+        entity.setStatus(PayStatus.INIT.value());
+        entity.setTitle(req.getPayTitle());
+        entity.setDescription(req.getPayDescription());
+        paymentService.insert(entity, "API[alipay.prePcPay.init]");
+
+        String product_code="FAST_INSTANT_TRADE_PAY";
+        AlipayTradePagePayRequest alipayRequest = new AlipayTradePagePayRequest();//创建API对应的request
+        AlipayTradePagePayModel model=new AlipayTradePagePayModel();
+        model.setOutTradeNo(entity.getId());
+        model.setSubject(entity.getTitle());
+        model.setTotalAmount(BigDecimal.valueOf(entity.getTotalFee()).multiply(BigDecimal.valueOf(0.01)).toString());
+        model.setBody(entity.getDescription());
+        model.setProductCode(product_code);
+        alipayRequest.setBizModel(model);
+        alipayRequest.setReturnUrl(alipayConfig.getProperty().getReturnUrl());
+        alipayRequest.setNotifyUrl(alipayConfig.getProperty().getCallbackUrl());//在公共参数中设置回跳和通知地址
+        String form="";
+        try {
+            form = alipayClient.pageExecute(alipayRequest).getBody(); //调用SDK生成表单
+        } catch (AlipayApiException e) {
+            log.error(e.getMessage(), e);
+            //3. 预支付失败处理
+            String errorMsg = String.format("%s|%s", e.getErrCode(), e.getErrMsg());
+            entity.setErrorMsg(errorMsg);
+            entity.setStatus(PayStatus.PRE_PCPAY_FAIL.value());
+            entity.setModifyBy("API[alipay.prePcPay.failed]");
+            entity.setModifyTime(new Date());
+            paymentService.save(entity);
+            throw e;
+        }
+        AliPrePayDTO dto = new AliPrePayDTO();
+        dto.setOrderInfo(form);
+        return dto;
+    }
